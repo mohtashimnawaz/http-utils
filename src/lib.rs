@@ -185,7 +185,7 @@ impl HttpClient {
         &self,
         url: &str,
         destination: &Path,
-        progress_callback: impl Fn(u64, u64),
+        mut progress_callback: impl FnMut(u64, u64),
     ) -> Result<(), HttpClientError> {
         let response = self.client.get(url)
             .send()
@@ -211,7 +211,7 @@ impl HttpClient {
         &self,
         url: &str,
         destination: &Path,
-        progress_callback: impl Fn(u64, u64),
+        mut progress_callback: impl FnMut(u64, u64),
     ) -> Result<(), HttpClientError> {
         // Try to open the file in append mode if it exists
         let file_exists = destination.exists();
@@ -298,11 +298,10 @@ impl HttpClient {
 mod tests {
     use super::*;
     use tokio::fs;
+    use std::sync::{Arc, Mutex};
 
     #[tokio::test]
     async fn test_get_request() {
-        // This would be better tested with a mock server in integration tests
-        // For now, we'll just test against httpbin
         let client = HttpClient::new();
         let response = client.get("https://httpbin.org/get").await;
         assert!(response.is_ok());
@@ -317,21 +316,21 @@ mod tests {
         let _ = fs::remove_file(&dest).await;
         
         let client = HttpClient::new();
-        let test_content = "test file content";
         
-        // Create a temporary HTTP server would be better, but for simplicity:
-        // Note: In a real project, you should use mockito for this
-        let mut progress_values = Vec::new();
+        // Use Arc<Mutex> to safely share mutable state between threads
+        let progress_values = Arc::new(Mutex::new(Vec::new()));
+        let progress_values_clone = progress_values.clone();
+        
         let result = client.download_file(
             "https://httpbin.org/bytes/16", // Small test file
             &dest,
-            |downloaded, total| {
-                progress_values.push((downloaded, total));
+            move |downloaded, total| {
+                progress_values_clone.lock().unwrap().push((downloaded, total));
             }
         ).await;
         
         assert!(result.is_ok());
-        assert!(!progress_values.is_empty());
+        assert!(!progress_values.lock().unwrap().is_empty());
         
         // Clean up
         let _ = fs::remove_file(&dest).await;
