@@ -253,4 +253,83 @@ impl HttpClient {
         response.bytes().await.map_err(Into::into)
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mockito::{mock, Server};
+    use tempfile::NamedTempFile;
+    use serde_json::json;
 
+    #[tokio::test]
+    async fn test_get_request() {
+        let mut server = Server::new();
+        let _m = mock("GET", "/test")
+            .with_status(200)
+            .with_header("content-type", "text/plain")
+            .with_body("hello world")
+            .create();
+
+        let client = HttpClient::with_base_url(server.url());
+        let response = client.get("/test").await.unwrap();
+        assert_eq!(response.status(), 200);
+        let body = response.text().await.unwrap();
+        assert_eq!(body, "hello world");
+    }
+
+    #[tokio::test]
+    async fn test_file_download() {
+        let mut server = Server::new();
+        let _m = mock("GET", "/file")
+            .with_status(200)
+            .with_header("content-type", "application/octet-stream")
+            .with_body("file content")
+            .create();
+
+        let dest = NamedTempFile::new().unwrap();
+        let client = HttpClient::new();
+        
+        let mut progress_values = Vec::new();
+        client.download_file(
+            &format!("{}/file", server.url()),
+            dest.path(),
+            |downloaded, total| {
+                progress_values.push((downloaded, total));
+            }
+        ).await.unwrap();
+
+        assert!(!progress_values.is_empty());
+        let content = std::fs::read_to_string(dest.path()).unwrap();
+        assert_eq!(content, "file content");
+    }
+
+    #[tokio::test]
+    async fn test_resumable_download() {
+        let mut server = Server::new();
+        let _m = mock("GET", "/large-file")
+            .with_status(206)
+            .with_header("content-type", "application/octet-stream")
+            .with_header("content-range", "bytes 10-19/20")
+            .with_body("continued")
+            .create_async()
+            .await;
+
+        let dest = NamedTempFile::new().unwrap();
+        // Create a file with partial content
+        tokio::fs::write(dest.path(), "existing d").await.unwrap();
+
+        let client = HttpClient::new();
+        
+        let mut progress_values = Vec::new();
+        client.download_file_with_resume(
+            &format!("{}/large-file", server.url()),
+            dest.path(),
+            |downloaded, total| {
+                progress_values.push((downloaded, total));
+            }
+        ).await.unwrap();
+
+        assert!(!progress_values.is_empty());
+        let content = std::fs::read_to_string(dest.path()).unwrap();
+        assert_eq!(content, "existing dcontinued");
+    }
+}
