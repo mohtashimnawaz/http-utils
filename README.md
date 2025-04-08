@@ -24,22 +24,3 @@ Add this to your `Cargo.toml`:
 ```toml
 [dependencies]
 http-client-utils = "0.1"
-
-use http_client_utils::HttpClient;
-
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let client = HttpClient::new();
-    
-    // GET request
-    let response = client.get("https://httpbin.org/get").await?;
-    println!("Status: {}", response.status());
-    
-    // POST request with JSON
-    let response = client.post(
-        "https://httpbin.org/post",
-        &serde_json::json!({"key": "value"})
-    ).await?;
-    
-    Ok(())
-}
